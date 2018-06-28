@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:security="http://www.springframework.org/schema/security"
+       xmlns:oauth2="http://www.springframework.org/schema/security/oauth2"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/security/oauth2 http://www.springframework.org/schema/security/spring-security-oauth2.xsd
+       http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security.xsd">
+
+    <!-- 提供客户端相信信息 -->
+    <oauth2:client-details-service id="clientDetailsService">
+        <!--
+            测试：curl -XPOST http://localhost:8080/oauth/token -H 'Content-Type: application/x-www-form-urlencoded' -d 'client_id=client-1&client_secret=client&grant_type=client_credentials'
+        -->
+        <oauth2:client client-id="client-1" secret="client" scope="read" authorized-grant-types="client_credentials" authorities="IS_AUTHENTICATED_FULLY"/>
+        <!--
+            测试：在浏览器中输入：http://localhost:8080/oauth/authorize?client_id=client-2&response_type=code&state=BWNvjZ
+            在authorization_code模式下，authorities将使用user的值，而非client
+        -->
+        <oauth2:client client-id="client-2" secret="client" scope="read" authorized-grant-types="authorization_code" redirect-uri="http://localhost:8082"/>
+        <!--
+            测试：在浏览器中输入：http://localhost:8080/oauth/authorize?client_id=client-3&response_type=code&state=BWNvjZ
+            在authorization_code模式下，authorities将使用user的值，而非client
+        -->
+        <oauth2:client client-id="client-3" secret="client" scope="read" authorized-grant-types="authorization_code" redirect-uri="http://localhost:8083/app" autoapprove="true"/>
+        <!--
+            测试：在浏览器中输入：http://localhost:8080/oauth/authorize?client_id=client-4&response_type=token&state=BWNvjZ
+            在implicit模式下，authorities将使用user的值，而非client
+        -->
+        <oauth2:client client-id="client-4" secret="client" scope="read" authorized-grant-types="implicit" redirect-uri="http://localhost:8084/app"/>
+        <!--
+            测试：curl -XPOST http://localhost:8080/oauth/token -H 'Content-Type: application/x-www-form-urlencoded' -d 'grant_type=password&username=admin&password=admin&client_id=client-5&client_secret=client'
+            在password模式下，authorities将使用user的值，而非client
+        -->
+        <oauth2:client client-id="client-5" secret="client" scope="read" authorized-grant-types="password"/>
+    </oauth2:client-details-service>
+
+    <bean id="tokenStore" class="org.springframework.security.oauth2.provider.token.store.InMemoryTokenStore"/>
+
+    <!-- 提供token -->
+    <bean id="tokenServices" class="org.springframework.security.oauth2.provider.token.DefaultTokenServices">
+        <property name="tokenStore" ref="tokenStore"/>
+        <property name="supportRefreshToken" value="true"/>
+        <property name="clientDetailsService" ref="clientDetailsService"/>
+    </bean>
+
+    <bean id="auth2RequestFactory" class="org.springframework.security.oauth2.provider.request.DefaultOAuth2RequestFactory">
+        <constructor-arg name="clientDetailsService" ref="clientDetailsService"/>
+    </bean>
+
+    <!-- 默认的DefaultUserApprovalHandler不支持autoapprove -->
+    <bean id="approvalHandler" class="org.springframework.security.oauth2.provider.approval.TokenStoreUserApprovalHandler">
+        <property name="clientDetailsService" ref="clientDetailsService"/>
+        <property name="tokenStore" ref="tokenStore"/>
+        <property name="requestFactory" ref="auth2RequestFactory"/>
+    </bean>
+
+    <!-- oauth验证服务 -->
+    <oauth2:authorization-server client-details-service-ref="clientDetailsService" token-services-ref="tokenServices" user-approval-handler-ref="approvalHandler" check-token-enabled="true">
+        <oauth2:authorization-code/>
+        <oauth2:implicit/>
+        <oauth2:refresh-token/>
+        <oauth2:client-credentials/>
+        <oauth2:password/>
+    </oauth2:authorization-server>
+
+    <!--  -->
+    <bean id="auth2AuthenticationEntryPoint" class="org.springframework.security.oauth2.provider.error.OAuth2AuthenticationEntryPoint"/>
+
+    <!-- 用于client的security:http-basic认证 -->
+    <bean id="clientAuthenticationEntryPoint" class="org.springframework.security.oauth2.provider.error.OAuth2AuthenticationEntryPoint">
+        <property name="typeName" value="Basic"/>
+    </bean>
+
+    <!-- oauth客户端验证过滤器，ClientCredentialsTokenEndpointFilter默认的RequestMatcherPath为/oauth/token -->
+    <bean id="clientCredentialsTokenEndpointFilter" class="org.springframework.security.oauth2.provider.client.ClientCredentialsTokenEndpointFilter">
+        <property name="authenticationManager" ref="clientAuthenticationManager"/>
+    </bean>
+
+    <!-- 校验异常处理类 -->
+    <bean id="auth2AccessDeniedHandler" class="org.springframework.security.oauth2.provider.error.OAuth2AccessDeniedHandler"/>
+
+    <!-- oauth token权限过滤：校验客户端权限 -->
+    <security:http pattern="/oauth/token" create-session="stateless" authentication-manager-ref="clientAuthenticationManager" entry-point-ref="auth2AuthenticationEntryPoint">
+        <security:intercept-url pattern="/**" access="IS_AUTHENTICATED_FULLY"/>
+        <!-- 启用client basic认证：oauth2:rest-template在获取token时，默认使用此认证方式 -->
+        <security:http-basic entry-point-ref="clientAuthenticationEntryPoint"/>
+        <!-- 启用client url验证 -->
+        <security:custom-filter ref="clientCredentialsTokenEndpointFilter" after="BASIC_AUTH_FILTER"/>
+        <security:access-denied-handler ref="auth2AccessDeniedHandler"/>
+    </security:http>
+
+    <!-- token验证endpoint的权限验证，采用basic方式进行验证client -->
+    <security:http pattern="/oauth/check_token" create-session="stateless" authentication-manager-ref="clientAuthenticationManager" entry-point-ref="auth2AuthenticationEntryPoint">
+        <security:intercept-url pattern="/**" access="IS_AUTHENTICATED_FULLY"/>
+        <security:access-denied-handler ref="auth2AccessDeniedHandler"/>
+        <!-- 在filterChain中增加BasicAuthenticationFilter -->
+        <security:http-basic/>
+    </security:http>
+
+    <!-- 默认权限过滤 -->
+    <security:http auto-config="true" authentication-manager-ref="userAuthenticationManager">
+        <security:intercept-url pattern="/**" access="IS_AUTHENTICATED_FULLY"/>
+    </security:http>
+
+    <!-- 普通用户验证管理器 -->
+    <security:authentication-manager alias="userAuthenticationManager">
+        <security:authentication-provider>
+            <security:user-service>
+                <security:user name="admin" password="admin" authorities="IS_AUTHENTICATED_FULLY"/>
+            </security:user-service>
+        </security:authentication-provider>
+    </security:authentication-manager>
+
+    <!-- 将ClientDetails包装为UserDetails供AuthenticationManager使用 -->
+    <bean id="clientDetailsUserDetailsService" class="org.springframework.security.oauth2.provider.client.ClientDetailsUserDetailsService">
+        <constructor-arg ref="clientDetailsService"/>
+    </bean>
+
+    <!-- oauth客户端验证管理器 -->
+    <security:authentication-manager id="clientAuthenticationManager">
+        <security:authentication-provider user-service-ref="clientDetailsUserDetailsService"/>
+    </security:authentication-manager>
+
+</beans>

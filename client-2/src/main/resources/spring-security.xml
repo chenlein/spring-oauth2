@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:security="http://www.springframework.org/schema/security"
+       xmlns:oauth2="http://www.springframework.org/schema/security/oauth2"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/security/oauth2 http://www.springframework.org/schema/security/spring-security-oauth2.xsd
+       http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security.xsd">
+
+    <bean id="tokenServices" class="org.springframework.security.oauth2.provider.token.RemoteTokenServices">
+        <property name="clientId" value="client-2"/>
+        <property name="clientSecret" value="client"/>
+        <property name="checkTokenEndpointUrl" value="http://localhost:8080/oauth/check_token"/>
+    </bean>
+
+    <oauth2:resource-server id="client-2" token-services-ref="tokenServices"/>
+
+    <bean id="oAuth2AuthenticationEntryPoint" class="org.springframework.security.oauth2.provider.error.OAuth2AuthenticationEntryPoint"/>
+
+    <security:http entry-point-ref="oAuth2AuthenticationEntryPoint">
+        <security:intercept-url pattern="/**" access="IS_AUTHENTICATED_FULLY"/>
+        <security:custom-filter ref="client-2" before="PRE_AUTH_FILTER"/>
+        <security:access-denied-handler ref="auth2AccessDeniedHandler"/>
+        <!-- 用来出来UserRedirectRequiredException -->
+        <security:custom-filter ref="clientFilter" after="EXCEPTION_TRANSLATION_FILTER"/>
+    </security:http>
+
+    <bean id="auth2AccessDeniedHandler" class="org.springframework.security.oauth2.provider.error.OAuth2AccessDeniedHandler"/>
+
+    <security:authentication-manager/>
+
+    <!--============== 使用oauth2:rest-template，在调用REST前自动获取Token ==============-->
+
+    <oauth2:resource id="oauth" type="authorization_code" client-id="client-2" client-secret="client" access-token-uri="http://localhost:8080/oauth/token" user-authorization-uri="http://localhost:8080/oauth/authorize"/>
+
+    <oauth2:rest-template id="restTemplate" resource="oauth"/>
+
+    <oauth2:client id="clientFilter"/>
+
+</beans>
